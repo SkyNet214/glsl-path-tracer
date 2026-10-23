@@ -1,15 +1,14 @@
-# GLSL Raytracer
+# GLSL Path tracer
 
-![Raytracer Preview](preview.png)
+![Path Tracer Preview](preview.png)
 
 This project is a local port of a Shadertoy-style path tracer. It uses WebGL 2 to render and accumulate samples across multiple passes.
 
 ## Project Structure
 
 - `index.html`: The main entry point. It sets up the WebGL 2 context, manages framebuffers for accumulation (ping-ponging), and handles the rendering loop.
-- `bufferA.glsl`: The raytracing and accumulation logic.
+- `bufferA.glsl`: The path tracing and accumulation logic.
 - `image.glsl`: Post-processing (ACES tonemapping and gamma correction).
-- `GEMINI.md`: Architectural overview and technical details.
 
 ## How to Run Locally
 
