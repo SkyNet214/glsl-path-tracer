@@ -10,7 +10,7 @@ struct Ray {
 
 struct Material {
     vec3 color;
-    float emission_strength;
+    float emissivity;
     float roughness;
     bool glas;
 };
@@ -18,8 +18,7 @@ struct Material {
 struct Sphere {
     vec3 center;
     float radius;
-    Material mat;
-    
+    Material mat; 
 };
 
 struct Plane {
@@ -28,13 +27,6 @@ struct Plane {
     Material mat;
 };
 
-struct Triangle {
-    vec3 v0, v1, v2; // vertices
-    Material material;
-    vec3 normal; // optional, for smooth shading
-};
-
-
 struct Hit {
     vec3 point;
     vec3 normal;
@@ -42,7 +34,6 @@ struct Hit {
     Material mat;
     bool inside;
 };
-
 
 
 float atan2(float y, float x) {
@@ -81,7 +72,7 @@ vec3 skybox(vec3 N) {
     return texture(iChannel1, vec2(u + 0.1*iTime, v)).rgb;
 }
 
-// random number generator
+// Random number generator
 uint NextRandom(inout uint state)
 {
 	state = state * 747796405u + 2891336453u;
@@ -90,12 +81,13 @@ uint NextRandom(inout uint state)
 	return result;
 }
 
+// Returns random float between 0.0 and 1.0
 float RandomValue(inout uint state)
 {
 	return float(NextRandom(state)) / 4294967295.0; // 2^32 - 1
 }
 
-// Random value in normal distribution (with mean=0 and sd=1)
+// Returns random float in normal distribution (with mean=0 and sd=1)
 float RandomValueNormalDistribution(inout uint state)
 {
 	// Thanks to https://stackoverflow.com/a/6178290
@@ -114,7 +106,7 @@ vec3 RandomDirection(inout uint state)
 	return normalize(vec3(x, y, z));
 }
 
-
+// Calculates intersection of given ray and sphere
 Hit hit_sphere(Ray r, Sphere s) {
     float a = dot(r.dir, (r.origin - s.center));
     float b = length(r.origin - s.center);
@@ -143,6 +135,7 @@ Hit hit_sphere(Ray r, Sphere s) {
     return h;
 }
 
+// Calculates intersection of given ray and plane
 Hit hit_plane(Ray r, Plane p) {
     Hit h;
     h.t = -1.0;
@@ -157,13 +150,16 @@ Hit hit_plane(Ray r, Plane p) {
     return h;
 }
 
-Sphere scene[] = Sphere[2](
+
+// Array of spheres to be rendered
+Sphere scene[] = Sphere[3](
     Sphere(vec3(0.0, 3.9, 0.0), 1.0, Material(vec3(1.000,1.000,1.000), 1.0, 0.0, false)),
-    Sphere(vec3(0.0, -1.5, 0.0), 1.0, Material(vec3(1.000,1.000,1.000), 0.0, 0.0, false))
+    Sphere(vec3(-0.5, -1.5, -1.5), 1.0, Material(vec3(1.000,1.000,1.000), 0.0, 1.0, true)),
+    Sphere(vec3(0.5, -1.5, 1.5), 1.0, Material(vec3(1.000,1.000,1.000), 0.0, 1.0, false))
 );
 
 
-
+// Array of planes acting as wals for the room
 const vec3 WHITE = vec3(0.89);
 Plane walls[] = Plane[6](
     Plane(vec3(0.0, -3.0, 0.0), vec3(0.0, -1.0, 0.0), Material(vec3(0.153,0.282,0.808), 0.0, 1.0, false)), // bottom
@@ -175,14 +171,22 @@ Plane walls[] = Plane[6](
 );
 
 
-
+// Main rendering function, takes in a ray and returns the color of the ray after tracing its path
 vec3 ray_color(Ray ray, uint rngState) {
+
     Ray r = ray;
+    // In case the ray hits an object with emissivity > 0
     vec3 raylight = vec3(0.0, 0.0, 0.0);
     vec3 raycol = vec3(1.0, 1.0, 1.0);
+
+    // Each pass loop changes the ray color, origin and direction based on what the ray hit
     for (int iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
+        
+        // Get closest intersection with ray
         Hit closest;
         closest.t = -1.0;
+        // First loop over all the spheres then over all planes
+        // TODO: Loop over one unified array for all objects in the scene (void pointer array?)
         for (int i = 0; i < scene.length(); i++) {
             Sphere s = scene[i];
             Hit h = hit_sphere(r, s);
@@ -197,9 +201,11 @@ vec3 ray_color(Ray ray, uint rngState) {
                 closest = h;
             }
         }
-        
+
+
+        // If ray hit anything, calculate new direction ray direction based on diffuse and specular reflection and accumulate onto the ray color and radiance
         if (closest.t >= 0.0) {
-            vec3 emitted_light = closest.mat.color * closest.mat.emission_strength;
+            vec3 emitted_light = closest.mat.color * closest.mat.emissivity;
             raylight += emitted_light * raycol;
             raycol *= closest.mat.color; //* (closest.normal + 1.0);
             vec3 diffDir = RandomDirection(rngState) + closest.normal;
@@ -207,15 +213,15 @@ vec3 ray_color(Ray ray, uint rngState) {
             vec3 newdir = lerp(specDir, diffDir, closest.mat.roughness);
 
             if (closest.mat.glas) {
-                float eta = !closest.inside ? 1.5 / 1.0 : 1.0 / 1.5; 
+                float eta = !closest.inside ? 1.0 / 1.0 : 1.0 / 1.0; 
                 float cos_theta = min(dot(-r.dir, closest.normal), 2.0);
                 float sin_theta = sqrt(1.0 - cos_theta*cos_theta);
 
                 bool cannot_refract = eta * sin_theta > 1.0;
                 if (cannot_refract) {
-                    newdir = reflect(r.dir, closest.normal);
+                    newdir = reflect(-r.dir, closest.normal);
                 } else {
-                    newdir = refract(r.dir, closest.normal, eta);
+                    newdir = refract(-r.dir, closest.normal, eta);
                 }
             }
             
@@ -238,41 +244,47 @@ vec3 ray_color(Ray ray, uint rngState) {
 
 void mainImage( out vec4 fragColor, in vec2 fragCoord )
 {
-    vec3 cam = vec3(0.0, 0.0, -8.0);
+    vec3 cam = vec3(0.0, 0.0, -8.0); // Position of camera
+    
+    // Viewport dimensions and focal length
     float vp_h = 2.0;
     float vp_w = vp_h * iResolution.x / iResolution.y;
     float vp_fl = 1.0;
+
+    // Upper left corner of viewport
     vec3 ulc = cam + vec3(0.0, 0.0, vp_fl) - vec3(0.0, vp_h / 2.0, 0.0) - vec3(vp_w / 2.0, 0.0, 0.0);
+    
+    // Normalized screen coordinates of current pixel (origin is in screen center)
     vec2 uv = fragCoord / iResolution.xy + 0.5;
     uv.x *= iResolution.x / iResolution.y;
+
+    // Generation of RNG seed
     vec2 numPixels = iResolution.xy;
     vec2 pixelCoord = uv*numPixels;
     uint pixelIndex = uint(pixelCoord.y * numPixels.x + pixelCoord.x);
     uint rngState = pixelIndex + uint(iFrame * 719393);
     
-    // scene[1].center.y = 1.5*sin(iTime);
-    /*
-    float radius = 10.0;
-    scene[0].center.x += radius * sin(iTime);
-    // scene[0].center.y += 4.0 * sin(2.0*iTime);
-    scene[0].center.z += radius * cos(iTime);
-    scene[1].center.x += radius * sin(iTime + PI);
-    // scene[1].center.y += 4.0 * sin(2.0*(iTime + 3.0*PI/4.0));
-    scene[1].center.z += radius * cos(iTime + PI);*/
     Ray r;
     r.origin = cam;
     r.dir = normalize((ulc + vec3(uv.xy, 0.0)) - cam);
     vec3 pxl_col = vec3(0.0, 0.0, 0.0);
+
+    // Calculation of pixel color by superimposing multiple samples (currently only 1)
     for (int s = 0; s < MAX_SAMPLES; s++) {
         r.dir = normalize((ulc + vec3(uv.xy, 0.0) + 0.2 * vec3(vp_w / iResolution.x * RandomValueNormalDistribution(rngState), vp_h / iResolution.y * RandomValueNormalDistribution(rngState),0.0)) - cam);
         pxl_col += ray_color(r, rngState);
     }
+
+    // Normalize pixel color
     vec3 currCol = vec3(pxl_col / float(MAX_SAMPLES));
-    vec4 prevCol = texelFetch(iChannel0, ivec2(fragCoord - 0.5), 0);
+    
+    // Overlay the first 10 000 passes 
+    vec4 prevCol = texelFetch(iChannel0, ivec2(fragCoord - 0.5), 0);    
     if (prevCol.a < 10000.0) {
         prevCol += vec4(currCol, 1.0);
     }
     fragColor = prevCol;
+    
     /*
     vec3 prevAvg = textureLod(iChannel0, uv, 0.0f).rgb;
     vec3 currCol = vec3(pxl_col / float(MAX_SAMPLES));
